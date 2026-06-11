@@ -23,7 +23,29 @@ var health := 90.0
 
 var _agent: NavigationAgent3D
 var _anim: AnimationPlayer
+var _walk_anim := ""
 var _model: Node3D
+var _skel: Skeleton3D
+var _bone_hips := -1
+var _bone_l_arm := -1
+var _bone_r_arm := -1
+var _bone_l_fore := -1
+var _bone_r_fore := -1
+var _bone_l_leg := -1
+var _bone_r_leg := -1
+var _bone_l_foot := -1
+var _bone_r_foot := -1
+var _generic_left_bones: Array[int] = []
+var _generic_right_bones: Array[int] = []
+var _generic_leg_bones: Array[int] = []
+var _left_parts: Array[Node3D] = []
+var _right_parts: Array[Node3D] = []
+var _leg_parts: Array[Node3D] = []
+var _part_rest_rot := {}
+var _base_model_pos := Vector3.ZERO
+var _base_model_rot := Vector3.ZERO
+var _motion_phase := 0.0
+var _motion_blend := 0.0
 var _dying := false
 var _stagger := 0.0
 var _speed := 4.0
@@ -78,6 +100,7 @@ func _ready() -> void:
 	# Pieds du modèle posés sur l'origine du body.
 	var center := aabb.get_center() * s
 	model.position = Vector3(-center.x, -aabb.position.y * s, -center.z)
+	_setup_motion_rig()
 
 	var cap := CapsuleShape3D.new()
 	cap.radius = clampf(aabb.size.x * s * 0.25, 0.3, 0.6)
@@ -100,8 +123,9 @@ func _ready() -> void:
 		_anim = anims[0]
 		var list := _anim.get_animation_list()
 		if list.size() > 0:
-			_anim.get_animation(list[0]).loop_mode = Animation.LOOP_LINEAR
-			_anim.play(list[0])
+			_walk_anim = list[0]
+			_anim.get_animation(_walk_anim).loop_mode = Animation.LOOP_LINEAR
+			_anim.play(_walk_anim)
 
 
 ## Coup reçu : dégâts, recul et bref étourdissement ; mort en dessous de 0.
@@ -147,6 +171,7 @@ func _physics_process(delta: float) -> void:
 		if not _floats and not is_on_floor():
 			velocity.y -= _gravity * delta
 		move_and_slide()
+		_update_visual_motion(delta)
 		return
 	var hunting := player != null and is_instance_valid(player) and not player.dead
 	var dist := INF
@@ -268,6 +293,7 @@ func _physics_process(delta: float) -> void:
 		face = player.global_position - global_position
 	if Vector2(face.x, face.z).length() > 0.1:
 		rotation.y = lerp_angle(rotation.y, atan2(face.x, face.z), 8.0 * delta)
+	_update_visual_motion(delta)
 
 
 func _attack_allowed() -> bool:
@@ -333,6 +359,191 @@ func _wander(delta: float) -> Vector3:
 			var a := randf() * TAU
 			_wander_dir = Vector3(cos(a), 0.0, sin(a))
 	return _wander_dir
+
+
+func _setup_motion_rig() -> void:
+	if _model == null:
+		return
+	_base_model_pos = _model.position
+	_base_model_rot = _model.rotation
+	_motion_phase = randf() * TAU
+
+	var skels := _model.find_children("*", "Skeleton3D", true, false)
+	if not skels.is_empty():
+		_skel = skels[0]
+		_find_motion_bones()
+
+	for node: Node in _model.find_children("*", "Node3D", true, false):
+		var part := node as Node3D
+		if part == null or part is Skeleton3D:
+			continue
+		_register_motion_part(part)
+
+
+func _find_motion_bones() -> void:
+	if _skel == null:
+		return
+	for i in _skel.get_bone_count():
+		var n := _skel.get_bone_name(i).to_lower()
+		if _bone_hips < 0 and (n.contains("hips") or n.contains("pelvis")):
+			_bone_hips = i
+		elif _bone_l_arm < 0 and n.contains("leftarm") and not n.contains("fore") \
+				and not n.contains("hand"):
+			_bone_l_arm = i
+		elif _bone_r_arm < 0 and n.contains("rightarm") and not n.contains("fore") \
+				and not n.contains("hand"):
+			_bone_r_arm = i
+		elif _bone_l_fore < 0 and n.contains("leftforearm"):
+			_bone_l_fore = i
+		elif _bone_r_fore < 0 and n.contains("rightforearm"):
+			_bone_r_fore = i
+		elif _bone_l_leg < 0 and (n.contains("leftupleg") or n.contains("leftthigh")):
+			_bone_l_leg = i
+		elif _bone_r_leg < 0 and (n.contains("rightupleg") or n.contains("rightthigh")):
+			_bone_r_leg = i
+		elif _bone_l_foot < 0 and n.contains("leftfoot"):
+			_bone_l_foot = i
+		elif _bone_r_foot < 0 and n.contains("rightfoot"):
+			_bone_r_foot = i
+	if _bone_l_arm < 0 and _bone_r_arm < 0 and _bone_l_leg < 0 and _bone_r_leg < 0:
+		_infer_motion_bones_from_rest()
+
+
+func _infer_motion_bones_from_rest() -> void:
+	var poses := []
+	var min_x := INF
+	var max_x := -INF
+	var min_y := INF
+	var max_y := -INF
+	for i in _skel.get_bone_count():
+		var p := _skel.get_bone_global_rest(i).origin
+		poses.append({"idx": i, "pos": p})
+		min_x = minf(min_x, p.x)
+		max_x = maxf(max_x, p.x)
+		min_y = minf(min_y, p.y)
+		max_y = maxf(max_y, p.y)
+	var width := maxf(max_x - min_x, 0.01)
+	var height := maxf(max_y - min_y, 0.01)
+	var center_x := (min_x + max_x) * 0.5
+	for entry in poses:
+		var idx: int = entry["idx"]
+		if _skel.get_bone_parent(idx) < 0:
+			continue
+		var p: Vector3 = entry["pos"]
+		var side := p.x - center_x
+		if absf(side) < width * 0.12:
+			continue
+		var y_norm := (p.y - min_y) / height
+		if y_norm > 0.38:
+			if side < 0.0:
+				_generic_left_bones.append(idx)
+			else:
+				_generic_right_bones.append(idx)
+		elif y_norm > 0.08:
+			_generic_leg_bones.append(idx)
+
+
+func _register_motion_part(part: Node3D) -> void:
+	var n := part.name.to_lower()
+	var direct_name := not n.contains("_")
+	if n.begins_with("leftarm") and direct_name:
+		_left_parts.append(part)
+	elif n.begins_with("rightarm") and direct_name:
+		_right_parts.append(part)
+	elif n.begins_with("legs") and direct_name:
+		_leg_parts.append(part)
+	elif n.begins_with("leftfinger") and direct_name:
+		_left_parts.append(part)
+	elif n.begins_with("rightfinger") and direct_name:
+		_right_parts.append(part)
+	if _left_parts.has(part) or _right_parts.has(part) or _leg_parts.has(part):
+		_part_rest_rot[part] = part.rotation
+
+
+func _update_visual_motion(delta: float) -> void:
+	if _model == null:
+		return
+	var planar_speed := Vector2(velocity.x, velocity.z).length()
+	var moving := planar_speed > 0.18 and not _frozen and not _dying
+	var speed_ratio := clampf(planar_speed / maxf(_speed, 0.01), 0.0, 1.6)
+	var target_blend := 1.0 if moving else 0.0
+	_motion_blend = move_toward(_motion_blend, target_blend, delta * (6.0 if moving else 4.0))
+	_motion_phase += delta * lerpf(4.0, 8.2, clampf(speed_ratio, 0.0, 1.0)) \
+			* maxf(_motion_blend, 0.18)
+
+	if _anim != null and _walk_anim != "":
+		if not _anim.is_playing():
+			_anim.play(_walk_anim)
+		_anim.speed_scale = lerpf(0.0, 1.35, clampf(speed_ratio, 0.0, 1.0)) \
+				* _motion_blend
+
+	var stride := sin(_motion_phase)
+	var opposite := sin(_motion_phase + PI)
+	var bounce := absf(sin(_motion_phase * 2.0))
+	var idle := sin(Time.get_ticks_msec() / 1000.0 * 1.4 + _bob_phase)
+	var body_amount := maxf(_motion_blend, 0.18)
+	var float_mul := 0.35 if _floats else 1.0
+	_model.position = _base_model_pos + Vector3(0.0,
+			(bounce * 0.045 * _motion_blend + idle * 0.012 * (1.0 - _motion_blend)) \
+					* float_mul,
+			0.0)
+	_model.rotation = _base_model_rot + Vector3(
+			stride * 0.035 * _motion_blend,
+			0.0,
+			opposite * 0.045 * body_amount)
+
+	if _anim == null:
+		_apply_bone_motion(stride, opposite, speed_ratio)
+	_apply_part_motion(stride, opposite, speed_ratio)
+
+
+func _apply_bone_motion(stride: float, opposite: float, speed_ratio: float) -> void:
+	if _skel == null:
+		return
+	var blend := _motion_blend
+	var arm_amp := lerpf(0.25, 0.75, clampf(speed_ratio, 0.0, 1.0)) * blend
+	var leg_amp := lerpf(0.18, 0.55, clampf(speed_ratio, 0.0, 1.0)) * blend
+	var bend := (0.18 + absf(stride) * 0.18) * blend
+	_pose_bone(_bone_l_arm, Quaternion(Vector3(1, 0, 0), stride * arm_amp))
+	_pose_bone(_bone_r_arm, Quaternion(Vector3(1, 0, 0), opposite * arm_amp))
+	_pose_bone(_bone_l_fore, Quaternion(Vector3(1, 0, 0), bend))
+	_pose_bone(_bone_r_fore, Quaternion(Vector3(1, 0, 0), bend))
+	_pose_bone(_bone_l_leg, Quaternion(Vector3(1, 0, 0), opposite * leg_amp))
+	_pose_bone(_bone_r_leg, Quaternion(Vector3(1, 0, 0), stride * leg_amp))
+	_pose_bone(_bone_l_foot, Quaternion(Vector3(1, 0, 0), -stride * 0.22 * blend))
+	_pose_bone(_bone_r_foot, Quaternion(Vector3(1, 0, 0), -opposite * 0.22 * blend))
+	_pose_bone(_bone_hips, Quaternion(Vector3(0, 0, 1), opposite * 0.08 * blend))
+	for idx in _generic_left_bones:
+		_pose_bone(idx, Quaternion(Vector3(1, 0, 0), stride * arm_amp * 0.45))
+	for idx in _generic_right_bones:
+		_pose_bone(idx, Quaternion(Vector3(1, 0, 0), opposite * arm_amp * 0.45))
+	for idx in _generic_leg_bones:
+		_pose_bone(idx, Quaternion(Vector3(1, 0, 0), sin(_motion_phase * 2.0) * leg_amp * 0.25))
+
+
+func _pose_bone(idx: int, extra: Quaternion) -> void:
+	if idx < 0 or _skel == null:
+		return
+	var parent := _skel.get_bone_parent(idx)
+	var parent_rot := Quaternion(0.0, 0.0, 0.0, 1.0)
+	if parent >= 0:
+		parent_rot = _skel.get_bone_global_rest(parent).basis.get_rotation_quaternion()
+	var rest := _skel.get_bone_global_rest(idx).basis.get_rotation_quaternion()
+	_skel.set_bone_pose_rotation(idx, parent_rot.inverse() * (extra * rest))
+
+
+func _apply_part_motion(stride: float, opposite: float, speed_ratio: float) -> void:
+	var amp := lerpf(0.22, 0.75, clampf(speed_ratio, 0.0, 1.0)) * _motion_blend
+	for part in _left_parts:
+		var rest: Vector3 = _part_rest_rot.get(part, part.rotation)
+		part.rotation = rest + Vector3(stride * amp, 0.0, opposite * 0.18 * _motion_blend)
+	for part in _right_parts:
+		var rest: Vector3 = _part_rest_rot.get(part, part.rotation)
+		part.rotation = rest + Vector3(opposite * amp, 0.0, stride * 0.18 * _motion_blend)
+	for part in _leg_parts:
+		var rest: Vector3 = _part_rest_rot.get(part, part.rotation)
+		part.rotation = rest + Vector3(stride * amp * 0.45, 0.0,
+				sin(_motion_phase * 2.0) * 0.18 * _motion_blend)
 
 
 static func combined_aabb(root: Node) -> AABB:

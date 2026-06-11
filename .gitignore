@@ -1,2 +1,5 @@
 # Godot 4+ specific ignores
 .godot/
+
+# Archives sources (déjà extraites dans assets/audio/)
+sound and music.zip

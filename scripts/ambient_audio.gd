@@ -1,8 +1,8 @@
 class_name AmbientAudio
 extends AudioStreamPlayer
 
-## Drone sonore généré procéduralement (aucun fichier audio dans le projet) :
-## bourdonnement grave de néons + souffle filtré, pour l'ambiance pesante.
+## Ambiance sonore : musique d'horreur (1 h, en boucle) + drone procédural
+## discret en couche de fond (bourdonnement de néons + souffle filtré).
 
 const RATE := 22050.0
 
@@ -14,11 +14,20 @@ var _noise := 0.0
 
 
 func _ready() -> void:
+	# Musique d'ambiance par-dessus le drone.
+	var music := AudioStreamPlayer.new()
+	var track: AudioStreamMP3 = load("res://assets/audio/ambient_music.mp3")
+	track.loop = true
+	music.stream = track
+	music.volume_db = -10.0
+	add_child(music)
+	music.play()
+
 	var gen := AudioStreamGenerator.new()
 	gen.mix_rate = RATE
 	gen.buffer_length = 0.25
 	stream = gen
-	volume_db = -16.0
+	volume_db = -22.0
 	play()
 	_playback = get_stream_playback()
 
