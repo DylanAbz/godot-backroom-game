@@ -21,10 +21,15 @@ const TYPES := [
 	{"model": "res://assets/character/smiler_entity3_backrooms.glb", "height": 0.9,
 		"speed": 5.0, "floats": true, "hover": 1.4, "hp": 60.0,
 		"behavior": "ambusher", "damage": 16.0, "atk_cd": 1.1},
+	# "Le Disparu" : silhouette noire au visage de photo (les affiches DISPARU
+	# du niveau 0). Rare — voir PHOTO_CHANCE, jamais tiré au hasard uniforme.
+	{"photo_face": true, "height": 2.2,
+		"speed": 4.5, "hp": 120.0, "behavior": "smiler", "damage": 26.0, "atk_cd": 1.4},
 ]
 
 const MAX_MONSTERS := 5
 const MIN_SPAWN_DIST := 9.0
+const PHOTO_CHANCE := 0.1
 
 var active := false
 var player: PlayerController
@@ -65,7 +70,9 @@ func _try_spawn() -> void:
 		if absf(hit.y - player.global_position.y) > 2.0:
 			continue
 		if hit.distance_to(player.global_position) > MIN_SPAWN_DIST:
-			spawn_at(hit, randi() % TYPES.size())
+			var idx := TYPES.size() - 1 if randf() < PHOTO_CHANCE \
+					else randi() % (TYPES.size() - 1)
+			spawn_at(hit, idx)
 			return
 
 

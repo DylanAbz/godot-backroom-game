@@ -25,6 +25,7 @@ var portal: Area3D
 var game_over := false
 
 var _lights: Array[Dictionary] = []
+var _wet_lights := false
 var _screenshot_mode := false
 var _portal_mat: StandardMaterial3D
 var _portal_light: OmniLight3D
@@ -205,9 +206,13 @@ func _on_portal_entered(body: Node3D) -> void:
 func _place_flicker_lights() -> void:
 	var map := get_world_3d().navigation_map
 	var count: int = LEVELS[level_index].get("lights", 16)
+	_wet_lights = level is MazeLevel and level.wet
 	for i in count:
 		var p := NavigationServer3D.map_get_random_point(map, 1, true)
 		if p.y > SPAWN_POS.y + 1.5:
+			continue
+		# Zones de panne : secteurs entiers plongés dans le noir.
+		if level is MazeLevel and level.is_blackout(p):
 			continue
 		var light := OmniLight3D.new()
 		light.light_color = Color(1.0, 0.93, 0.68)
@@ -215,6 +220,15 @@ func _place_flicker_lights() -> void:
 		light.omni_range = 5.0
 		add_child(light)
 		light.global_position = p + Vector3(0, 2.3, 0)
+		# Chaque néon grésille doucement.
+		var buzz := AudioStreamPlayer3D.new()
+		buzz.stream = HorrorAudio.neon_buzz()
+		buzz.max_distance = 6.0
+		buzz.unit_size = 1.6
+		buzz.volume_db = -16.0
+		buzz.pitch_scale = randf_range(0.96, 1.05)
+		buzz.autoplay = true
+		light.add_child(buzz)
 		_lights.append({
 			"node": light,
 			"phase": randf() * TAU,
@@ -239,8 +253,10 @@ func _process(delta: float) -> void:
 		entry["next_flick"] -= delta
 		entry["flick_end"] -= delta
 		if entry["next_flick"] <= 0.0:
-			entry["next_flick"] = randf_range(3.0, 18.0)
-			entry["flick_end"] = randf_range(0.06, 0.3)
+			# Niveau humide : l'électricité est bien plus capricieuse.
+			entry["next_flick"] = randf_range(1.0, 6.0) if _wet_lights \
+					else randf_range(3.0, 18.0)
+			entry["flick_end"] = randf_range(0.06, 0.45 if _wet_lights else 0.3)
 		if entry["flick_end"] > 0.0:
 			light.light_energy = 0.05
 		else:
@@ -295,6 +311,13 @@ func _screenshot_flow() -> void:
 	spawner.spawn_at(player.global_position + fwd * 5.0, 0)
 	await get_tree().create_timer(1.2).timeout
 	await _capture("shot_monster.png")
+	# Vérification du "Disparu" (visage de photo, dernier type).
+	var disparu := spawner.spawn_at(player.global_position + fwd * 3.5,
+			MonsterSpawner.TYPES.size() - 1)
+	await get_tree().create_timer(0.6).timeout
+	await _capture("shot_disparu.png")
+	if is_instance_valid(disparu):
+		disparu.queue_free()
 	# Vérification du combat : un coup de tuyau sur un monstre proche.
 	var victim := spawner.spawn_at(player.global_position + fwd * 1.8, 2)
 	await get_tree().create_timer(0.4).timeout

@@ -18,7 +18,7 @@ func _init() -> void:
 		var s: float = model.scale.y
 		var mesh_h: float = monster_script.combined_aabb(model).size.y * s
 		var skel_h: float = monster_script.skeleton_rest_aabb(model).size.y * s
-		print(cfg["model"].get_file(),
+		print(str(cfg.get("model", "<photo_face>")).get_file(),
 				"  cible=", cfg["height"],
 				"  scale=", snappedf(s, 0.0001),
 				"  h_mesh=", snappedf(mesh_h, 0.01),

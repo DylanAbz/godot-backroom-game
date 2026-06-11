@@ -32,6 +32,10 @@ var key_cell := Vector2i.ZERO
 var key_collected := false
 ## Chemin spawn → sortie en cellules (pour la piste d'indices).
 var guide_cells: Array[Vector2i] = []
+## Variante "humide" : flaques réfléchissantes, gouttes, néons plus instables.
+var wet := false
+## Centres (monde) des zones de panne : aucun néon n'y est placé.
+var blackout_centers: Array[Vector3] = []
 
 var _key_node: Node3D
 var _key_light: OmniLight3D
@@ -46,13 +50,46 @@ var _rooms: Array[Rect2i] = []
 func _create_content() -> Node3D:
 	var root := Node3D.new()
 	root.name = "Maze"
+	wet = randf() < WET_CHANCE
 	_generate_layout()
 	_solve_layout()
+	_pick_blackout_zones()
 	_build_visuals(root)
 	_build_colliders(root)
 	exit_hint = cell_center(exit_cell)
 	_place_props(root)
 	return root
+
+
+## Tire des zones circulaires de panne, loin du spawn, de la clé et de la
+## sortie (leurs repères lumineux doivent rester visibles).
+func _pick_blackout_zones() -> void:
+	blackout_centers.clear()
+	var protected: Array[Vector2i] = [spawn_cell, key_cell, exit_cell]
+	for attempt in 60:
+		if blackout_centers.size() >= BLACKOUT_COUNT:
+			break
+		var c := Vector2i(randi_range(3, W - 4), randi_range(3, H - 4))
+		var center := cell_center(c)
+		var ok := true
+		for p in protected:
+			if cell_center(p).distance_to(center) < BLACKOUT_RADIUS + 6.0:
+				ok = false
+				break
+		for other in blackout_centers:
+			if other.distance_to(center) < BLACKOUT_RADIUS * 2.0:
+				ok = false
+				break
+		if ok:
+			blackout_centers.append(center)
+
+
+## Vrai si la position (monde) est dans une zone de panne de courant.
+func is_blackout(p: Vector3) -> bool:
+	for center in blackout_centers:
+		if Vector2(p.x, p.z).distance_to(Vector2(center.x, center.z)) < BLACKOUT_RADIUS:
+			return true
+	return false
 
 
 func _setup_collisions(_content: Node3D) -> void:
@@ -358,6 +395,13 @@ const SCRAWLS: Array[String] = [
 	"DERRIÈRE TOI ?",
 ]
 
+## Police "écrite avec les doigts" (Sinister Sunday, licence non commerciale).
+const BLOOD_FONT := preload("res://assets/fonts/sinister-sunday/Sinister Sunday.otf")
+const BLACKOUT_COUNT := 3
+const BLACKOUT_RADIUS := 10.0  # m
+## Proportion de parties où le niveau 0 est "humide" (flaques, gouttes).
+const WET_CHANCE := 0.35
+
 const PHOTO_DIR := "res://assets/images/"
 const POSTER_COUNT := 14
 ## Messages écrits au sang près des affiches de disparus.
@@ -387,12 +431,14 @@ func _place_props(root: Node3D) -> void:
 		_place_scrawl(root, c, SCRAWLS[randi() % SCRAWLS.size()])
 	_place_photos(root)
 	_place_almond_water(root)
+	_place_puddles(root)
+	_place_drip_emitters(root)
 
 
 ## Affiches "DISPARU" : les photos de assets/images placardées au hasard sur
 ## les murs, avec un message au sang (et ses coulures) sur un mur tout proche.
 func _place_photos(root: Node3D) -> void:
-	var textures := _load_photo_textures()
+	var textures := load_photo_textures()
 	if textures.is_empty():
 		return
 	for i in POSTER_COUNT:
@@ -402,19 +448,89 @@ func _place_photos(root: Node3D) -> void:
 		var anchor := _wall_anchor(c, randf_range(1.4, 1.6))
 		if anchor == Transform3D.IDENTITY:
 			continue
-		root.add_child(_make_poster(textures[i % textures.size()], anchor))
+		var msg_text := PHOTO_MESSAGES[randi() % PHOTO_MESSAGES.size()]
+		root.add_child(_make_poster(textures[i % textures.size()], anchor, msg_text))
+		_place_blood_trail(root, c, anchor)
 		# Le message au sang : sur la même cellule ou une voisine accessible.
 		var msg_cell := c
 		if randf() < 0.6:
 			msg_cell = _neighbor_towards(c,
 					Vector2i(randi_range(0, W - 1), randi_range(0, H - 1)))
-		_place_blood_message(root, msg_cell,
-				PHOTO_MESSAGES[randi() % PHOTO_MESSAGES.size()])
+		_place_blood_message(root, msg_cell, msg_text)
+
+
+## Traînée de sang au sol : éclaboussures de plus en plus grosses qui mènent
+## du couloir jusqu'au pied de l'affiche, où une mare s'est formée.
+func _place_blood_trail(root: Node3D, cell: Vector2i, poster_anchor: Transform3D) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.32, 0.02, 0.015, 0.92)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.roughness = 0.35
+	var foot := poster_anchor.origin
+	foot.y = 0.0
+	var start := cell_center(_neighbor_towards(cell,
+			Vector2i(randi_range(0, W - 1), randi_range(0, H - 1))))
+	var count := randi_range(5, 8)
+	for i in count:
+		var f := float(i) / float(count - 1)
+		var pos := start.lerp(foot, f) \
+				+ Vector3(randf_range(-0.3, 0.3), 0.0, randf_range(-0.3, 0.3)) * (1.0 - f)
+		root.add_child(_floor_splat(mat, pos, lerpf(0.1, 0.35, f)))
+	# La mare au pied du mur.
+	root.add_child(_floor_splat(mat, foot, randf_range(0.5, 0.8)))
+
+
+## Tache plate posée sur le sol (forme légèrement aplatie et orientée au hasard).
+func _floor_splat(mat: StandardMaterial3D, pos: Vector3, radius: float) -> MeshInstance3D:
+	var mesh := PlaneMesh.new()
+	mesh.size = Vector2(radius * 2.0, radius * randf_range(1.3, 2.0))
+	mesh.material = mat
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.position = pos + Vector3(0, 0.012, 0)
+	mi.rotation.y = randf() * TAU
+	return mi
+
+
+## Flaques au sol : quelques taches d'humidité sombres, ou partout en mode
+## humide (surface lisse → reflets spéculaires des néons).
+func _place_puddles(root: Node3D) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.05, 0.05, 0.045, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.roughness = 0.04
+	mat.metallic = 0.6
+	for i in (60 if wet else 10):
+		var c := Vector2i(randi_range(1, W - 2), randi_range(1, H - 2))
+		var pos := cell_center(c) + Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0))
+		root.add_child(_floor_splat(mat, pos, randf_range(0.35, 1.0)))
+
+
+## Gouttes d'eau : émetteurs 3D qui jouent un "plip" à intervalle aléatoire.
+func _place_drip_emitters(root: Node3D) -> void:
+	for i in (24 if wet else 8):
+		var c := Vector2i(randi_range(1, W - 2), randi_range(1, H - 2))
+		var sp := AudioStreamPlayer3D.new()
+		sp.stream = HorrorAudio.water_drip()
+		sp.max_distance = 14.0
+		sp.unit_size = 4.0
+		sp.volume_db = -6.0
+		sp.position = cell_center(c) + Vector3(0, 2.4, 0)
+		root.add_child(sp)
+		var timer := Timer.new()
+		timer.one_shot = true
+		sp.add_child(timer)
+		timer.timeout.connect(func() -> void:
+			sp.pitch_scale = randf_range(0.8, 1.3)
+			sp.play()
+			timer.start(randf_range(1.5, 6.0) if wet else randf_range(4.0, 14.0)))
+		timer.call_deferred("start", randf_range(0.5, 8.0))
 
 
 ## Charge toutes les images du dossier (les `.import` listés par DirAccess
-## dans un build exporté sont ramenés au nom de la ressource).
-func _load_photo_textures() -> Array[Texture2D]:
+## dans un build exporté sont ramenés au nom de la ressource). Statique :
+## aussi utilisée par Monster pour le visage du "Disparu".
+static func load_photo_textures() -> Array[Texture2D]:
 	var result: Array[Texture2D] = []
 	var dir := DirAccess.open(PHOTO_DIR)
 	if dir == null:
@@ -434,7 +550,7 @@ func _load_photo_textures() -> Array[Texture2D]:
 	return result
 
 
-func _make_poster(tex: Texture2D, anchor: Transform3D) -> Node3D:
+func _make_poster(tex: Texture2D, anchor: Transform3D, blood_text: String) -> Node3D:
 	var poster := Node3D.new()
 	poster.transform = anchor
 	poster.add_to_group("photo_posters")
@@ -486,7 +602,57 @@ func _make_poster(tex: Texture2D, anchor: Transform3D) -> Node3D:
 	footer.modulate = Color(0.2, 0.16, 0.15)
 	footer.position = Vector3(0, -0.245, 0.004)
 	poster.add_child(footer)
+
+	_add_poster_blood_message(poster, blood_text)
+
+	# On chuchote près des affiches… et parfois un rire lointain.
+	var breath := AudioStreamPlayer3D.new()
+	breath.stream = HorrorAudio.whisper()
+	breath.max_distance = 8.0
+	breath.unit_size = 2.5
+	breath.volume_db = -9.0
+	breath.autoplay = true
+	poster.add_child(breath)
+	var laugh := AudioStreamPlayer3D.new()
+	laugh.stream = preload("res://assets/audio/witch_laugh.mp3")
+	laugh.max_distance = 18.0
+	laugh.unit_size = 5.0
+	laugh.volume_db = -10.0
+	poster.add_child(laugh)
+	var timer := Timer.new()
+	timer.one_shot = true
+	laugh.add_child(timer)
+	timer.timeout.connect(func() -> void:
+		laugh.pitch_scale = randf_range(0.7, 0.95)
+		laugh.play()
+		timer.start(randf_range(40.0, 120.0)))
+	timer.call_deferred("start", randf_range(20.0, 90.0))
 	return poster
+
+
+## Graffiti sanglant collé au même mur que l'affiche : plus lisible que le
+## message secondaire aléatoire, et toujours visible près de la photo.
+func _add_poster_blood_message(poster: Node3D, text: String) -> void:
+	var label := _blood_label_node(text, 0.0048, Color(0.5, 0.015, 0.01, 0.98))
+	label.font_size = 76
+	label.position = Vector3(randf_range(-1.05, -0.82) if randf() < 0.5
+			else randf_range(0.82, 1.05), randf_range(-0.08, 0.22), 0.007)
+	label.rotate_object_local(Vector3.FORWARD, randf_range(-0.16, 0.16))
+	poster.add_child(label)
+
+	var drip_mat := StandardMaterial3D.new()
+	drip_mat.albedo_color = Color(0.36, 0.01, 0.008, 0.9)
+	drip_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	drip_mat.roughness = 0.42
+	for i in randi_range(5, 9):
+		var dm := QuadMesh.new()
+		dm.size = Vector2(randf_range(0.012, 0.04), randf_range(0.16, 0.55))
+		dm.material = drip_mat
+		var drip := MeshInstance3D.new()
+		drip.mesh = dm
+		drip.position = Vector3(label.position.x + randf_range(-0.55, 0.55),
+				label.position.y - randf_range(0.15, 0.45), 0.006)
+		poster.add_child(drip)
 
 
 ## Message écrit au sang, avec des coulures qui dégoulinent sous les lettres.
@@ -494,13 +660,7 @@ func _place_blood_message(root: Node3D, cell: Vector2i, text: String) -> void:
 	var anchor := _wall_anchor(cell, randf_range(1.45, 1.85))
 	if anchor == Transform3D.IDENTITY:
 		return
-	var label := Label3D.new()
-	label.text = text
-	label.font_size = 68
-	label.pixel_size = 0.0042
-	label.modulate = Color(0.5, 0.05, 0.03, 0.95)
-	label.transform = anchor
-	root.add_child(label)
+	root.add_child(_blood_label(text, anchor, 0.0042, Color(0.5, 0.05, 0.03, 0.95)))
 
 	var drip_mat := StandardMaterial3D.new()
 	drip_mat.albedo_color = Color(0.42, 0.03, 0.02, 0.88)
@@ -633,13 +793,27 @@ func _place_scrawl(root: Node3D, cell: Vector2i, text: String) -> void:
 	var anchor := _wall_anchor(cell, randf_range(1.3, 1.9))
 	if anchor == Transform3D.IDENTITY:
 		return
+	root.add_child(_blood_label(text, anchor, 0.004, Color(0.45, 0.08, 0.05, 0.85)))
+
+
+## Label3D "écrit au sang" : police tracée au doigt, légèrement de travers.
+func _blood_label(text: String, anchor: Transform3D, size: float, col: Color) -> Label3D:
+	var label := _blood_label_node(text, size, col)
+	label.transform = anchor
+	label.rotate_object_local(Vector3.FORWARD, randf_range(-0.09, 0.09))
+	return label
+
+
+func _blood_label_node(text: String, size: float, col: Color) -> Label3D:
 	var label := Label3D.new()
 	label.text = text
+	label.font = BLOOD_FONT
 	label.font_size = 60
-	label.pixel_size = 0.004
-	label.modulate = Color(0.45, 0.08, 0.05, 0.85)
-	label.transform = anchor
-	root.add_child(label)
+	label.pixel_size = size
+	label.modulate = col
+	label.outline_size = 4
+	label.outline_modulate = Color(0.08, 0.0, 0.0, 0.8)
+	return label
 
 
 func _place_exit_dressing(root: Node3D) -> void:

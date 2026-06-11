@@ -88,7 +88,11 @@ func _ready() -> void:
 		_state = "dormant"
 	_bob_phase = randf() * TAU
 
-	var model: Node3D = load(cfg["model"]).instantiate()
+	var model: Node3D
+	if cfg.get("photo_face", false):
+		model = _build_photo_dummy()
+	else:
+		model = load(cfg["model"]).instantiate()
 	_model = model
 	add_child(model)
 	var aabb := combined_aabb(model)
@@ -133,6 +137,68 @@ func _ready() -> void:
 			_walk_anim = list[0]
 			_anim.get_animation(_walk_anim).loop_mode = Animation.LOOP_LINEAR
 			_anim.play(_walk_anim)
+
+
+## "Le Disparu" : silhouette noire famélique dont le visage est l'une des
+## photos des affiches DISPARU. Membres nommés LeftArm/RightArm/Legs* pour
+## que le rig de mouvement procédural (_register_motion_part) les anime.
+func _build_photo_dummy() -> Node3D:
+	var root := Node3D.new()
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.015, 0.015, 0.02)
+	dark.roughness = 1.0
+
+	var body := MeshInstance3D.new()
+	var bm := CapsuleMesh.new()
+	bm.radius = 0.18
+	bm.height = 1.3
+	bm.material = dark
+	body.mesh = bm
+	body.position.y = 1.15
+	root.add_child(body)
+
+	for side in [-1.0, 1.0]:
+		var arm := MeshInstance3D.new()
+		var am := CapsuleMesh.new()
+		am.radius = 0.045
+		am.height = 1.0
+		am.material = dark
+		arm.mesh = am
+		arm.name = "LeftArm" if side < 0.0 else "RightArm"
+		arm.position = Vector3(side * 0.26, 1.25, 0.0)
+		root.add_child(arm)
+		var leg := MeshInstance3D.new()
+		var lm := CapsuleMesh.new()
+		lm.radius = 0.06
+		lm.height = 1.1
+		lm.material = dark
+		leg.mesh = lm
+		leg.name = "Legs" + ("L" if side < 0.0 else "R")
+		leg.position = Vector3(side * 0.11, 0.55, 0.0)
+		root.add_child(leg)
+
+	# Le visage : la photo d'un disparu, faiblement luminescente dans le noir.
+	var textures := MazeLevel.load_photo_textures()
+	if not textures.is_empty():
+		var tex: Texture2D = textures[randi() % textures.size()]
+		var face := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		var fw := 0.42
+		qm.size = Vector2(fw, clampf(
+				fw * float(tex.get_height()) / maxf(float(tex.get_width()), 1.0),
+				0.36, 0.6))
+		var fmat := StandardMaterial3D.new()
+		fmat.albedo_texture = tex
+		fmat.emission_enabled = true
+		fmat.emission_texture = tex
+		fmat.emission_energy_multiplier = 0.6
+		fmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		fmat.roughness = 0.85
+		qm.material = fmat
+		face.mesh = qm
+		face.position = Vector3(0.0, 2.0, 0.04)
+		root.add_child(face)
+	return root
 
 
 ## Coup reçu : dégâts, recul et bref étourdissement ; mort en dessous de 0.
