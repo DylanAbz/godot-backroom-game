@@ -136,10 +136,12 @@ func _attach_weapon() -> void:
 	mat.roughness = 0.45
 	cyl.material = mat
 	pipe.mesh = cyl
-	# Prise marteau : l'axe du tuyau suit le pouce (X local de la main),
-	# décalé pour que la majeure partie dépasse au-dessus du poing.
+	# Prise marteau : l'axe du tuyau suit le pouce (X local de la main).
+	# L'origine de l'os est au POIGNET : on décale vers les doigts (-Z local)
+	# pour placer le tuyau dans la paume, et le long de son axe (X) pour que
+	# la majeure partie dépasse au-dessus du poing.
 	pipe.rotation.z = -PI / 2.0
-	pipe.position = Vector3(0.2, -0.02, 0.0)
+	pipe.position = Vector3(0.2, 0.06, -0.09)
 	att.add_child(pipe)
 
 
