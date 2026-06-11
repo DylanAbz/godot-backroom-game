@@ -301,10 +301,13 @@ func _screenshot_flow() -> void:
 	player._try_attack()
 	await get_tree().create_timer(0.18).timeout
 	await _capture("shot_combat.png")
-	player._try_attack()
-	await get_tree().create_timer(0.8).timeout
-	player._try_attack()
-	await get_tree().create_timer(0.5).timeout
+	for i in 2:
+		# Le recul éjecte la cible : on la replace devant avant chaque coup.
+		await get_tree().create_timer(0.8).timeout
+		if is_instance_valid(victim):
+			victim.global_position = player.global_position + fwd * 1.6
+		player._try_attack()
+	await get_tree().create_timer(0.7).timeout
 	await _capture("shot_combat_kill.png")
 	if is_instance_valid(victim):
 		victim.queue_free()

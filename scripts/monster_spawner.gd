@@ -6,12 +6,21 @@ extends Node3D
 ## exclus : ce sont des personnages jouables.
 
 const TYPES := [
-	{"model": "res://assets/character/partygoer_from_backrooms.glb", "height": 2.1, "speed": 4.2, "hp": 110.0},
-	{"model": "res://assets/character/bacteria_-_kane_pixels_backrooms.glb", "height": 2.4, "speed": 2.9, "hp": 170.0},
-	{"model": "res://assets/character/kitty_-_backrooms_entity.glb", "height": 2.0, "speed": 5.3, "hp": 70.0},
-	{"model": "res://assets/character/smiler_backrooms.glb", "height": 1.1, "speed": 3.8, "floats": true, "hover": 1.3, "hp": 80.0},
-	{"model": "res://assets/character/backrooms_smiler_rig.glb", "height": 1.7, "speed": 4.5, "hp": 95.0},
-	{"model": "res://assets/character/smiler_entity3_backrooms.glb", "height": 0.9, "speed": 4.8, "floats": true, "hover": 1.4, "hp": 60.0},
+	{"model": "res://assets/character/partygoer_from_backrooms.glb", "height": 2.1,
+		"speed": 4.2, "hp": 110.0, "behavior": "stalker", "damage": 24.0, "atk_cd": 1.5},
+	{"model": "res://assets/character/bacteria_-_kane_pixels_backrooms.glb", "height": 2.4,
+		"speed": 2.6, "hp": 190.0, "behavior": "brute", "damage": 32.0, "atk_cd": 2.0,
+		"stagger_mult": 0.35},
+	{"model": "res://assets/character/kitty_-_backrooms_entity.glb", "height": 2.0,
+		"speed": 5.3, "hp": 70.0, "behavior": "rusher", "damage": 13.0, "atk_cd": 1.0},
+	{"model": "res://assets/character/smiler_backrooms.glb", "height": 1.1,
+		"speed": 4.0, "floats": true, "hover": 1.3, "hp": 80.0,
+		"behavior": "smiler", "damage": 20.0, "atk_cd": 1.3},
+	{"model": "res://assets/character/backrooms_smiler_rig.glb", "height": 1.7,
+		"speed": 4.4, "hp": 95.0, "behavior": "smiler", "damage": 20.0, "atk_cd": 1.3},
+	{"model": "res://assets/character/smiler_entity3_backrooms.glb", "height": 0.9,
+		"speed": 5.0, "floats": true, "hover": 1.4, "hp": 60.0,
+		"behavior": "ambusher", "damage": 16.0, "atk_cd": 1.1},
 ]
 
 const MAX_MONSTERS := 5
