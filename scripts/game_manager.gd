@@ -268,6 +268,30 @@ func _screenshot_flow() -> void:
 	await _capture("shot_down.png")
 	player.head.rotation.x = 0.0
 	var fwd: Vector3 = -player.global_transform.basis.z
+	# Vues externes : pose des bras, arme en main, puis frappe en cours.
+	var ext_cam := Camera3D.new()
+	add_child(ext_cam)
+	var fill := OmniLight3D.new()
+	fill.light_energy = 1.6
+	fill.omni_range = 6.0
+	ext_cam.add_child(fill)
+	var chest: Vector3 = player.global_position + Vector3(0, 1.1, 0)
+	ext_cam.global_position = chest + fwd * 1.7 + Vector3(0, 0.2, 0)
+	ext_cam.look_at(chest)
+	ext_cam.current = true
+	await get_tree().create_timer(0.2).timeout
+	await _capture("shot_player_front.png")
+	var side := fwd.cross(Vector3.UP)
+	ext_cam.global_position = chest + side * 1.7 + Vector3(0, 0.2, 0)
+	ext_cam.look_at(chest)
+	await get_tree().create_timer(0.1).timeout
+	await _capture("shot_player_side.png")
+	player._try_attack()
+	await get_tree().create_timer(0.14).timeout
+	await _capture("shot_player_swing.png")
+	await get_tree().create_timer(0.7).timeout
+	player.camera.current = true
+	ext_cam.queue_free()
 	spawner.spawn_at(player.global_position + fwd * 5.0, 0)
 	await get_tree().create_timer(1.2).timeout
 	await _capture("shot_monster.png")

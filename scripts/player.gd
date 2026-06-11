@@ -28,10 +28,16 @@ const ATTACK_COOLDOWN := 0.65
 const ATTACK_STAMINA := 7.0
 const ATTACK_KNOCKBACK := 7.0
 
-# Pose des bras : abaissés depuis la T-pose puis ramenés vers l'avant.
-const ARM_LOWER := 1.05
-const ARM_PITCH := -0.7
-const ARM_SWING_AMP := 0.35
+# Pose des bras (depuis la T-pose, en espace global squelette) :
+# bras gauche relâché le long du corps, coude légèrement plié ; bras droit en
+# garde, coude très plié pour tenir le tuyau devant la poitrine.
+const L_LOWER := 1.18
+const L_PITCH := -0.25
+const L_BEND := 0.4
+const R_LOWER := 0.92
+const R_PITCH := -0.45
+const R_BEND := 1.2
+const ARM_SWING_AMP := 0.3
 
 var health := 100.0
 var stamina := 100.0
@@ -40,10 +46,15 @@ var dead := false
 var _skel: Skeleton3D
 var _bone_l := -1
 var _bone_r := -1
+var _fore_l := -1
+var _fore_r := -1
+var _hand_r := -1
 var _focus: Interactable
-var _weapon_pivot: Node3D
 var _attack_cd := 0.0
 var _swing_tween: Tween
+# Offsets d'animation de frappe appliqués au bras droit (tweenés).
+var _atk_pitch := 0.0
+var _atk_bend := 0.0
 var _sway_t := 0.0
 var _bob_t := 0.0
 var _cam_base_y := 0.0
@@ -61,28 +72,6 @@ func _ready() -> void:
 	_cam_base_y = camera.position.y
 	_fov_base = camera.fov
 	_build_body_model()
-	_build_weapon()
-
-
-## Tuyau de plomberie tenu à droite de la caméra (viewmodel FPS).
-func _build_weapon() -> void:
-	_weapon_pivot = Node3D.new()
-	_weapon_pivot.position = Vector3(0.3, -0.32, -0.5)
-	_weapon_pivot.rotation.x = -1.0
-	head.add_child(_weapon_pivot)
-	var pipe := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.024
-	cyl.bottom_radius = 0.028
-	cyl.height = 0.85
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.35, 0.34, 0.32)
-	mat.metallic = 0.85
-	mat.roughness = 0.45
-	cyl.material = mat
-	pipe.mesh = cyl
-	pipe.position.y = 0.3
-	_weapon_pivot.add_child(pipe)
 
 
 func _build_body_model() -> void:
@@ -104,17 +93,70 @@ func _build_body_model() -> void:
 			_bone_l = i
 		elif bname.begins_with("RightArm"):
 			_bone_r = i
+		elif bname.begins_with("LeftForeArm"):
+			_fore_l = i
+		elif bname.begins_with("RightForeArm"):
+			_fore_r = i
+		elif bname.begins_with("RightHand_"):
+			# Le "_" exclut les phalanges (RightHandThumb1_30, etc.).
+			_hand_r = i
+	_attach_weapon()
+	_curl_fingers()
 	_update_arm_pose(0.0)
 
 
-func _pose_arm(idx: int, lower: float, pitch: float) -> void:
+## Referme les mains : poing serré à droite (tient le tuyau), main détendue
+## à gauche. Pose statique, appliquée une seule fois.
+func _curl_fingers() -> void:
+	for i in _skel.get_bone_count():
+		var bname := _skel.get_bone_name(i)
+		var right := bname.begins_with("RightHand") and not bname.begins_with("RightHand_")
+		var left := bname.begins_with("LeftHand") and not bname.begins_with("LeftHand_")
+		if not right and not left:
+			continue
+		var amount := 0.3 if bname.contains("Thumb") else (0.95 if right else 0.35)
+		_pose_bone(i, Quaternion(Vector3(0, 0, 1), amount if right else -amount))
+
+
+## Tuyau de plomberie attaché à l'os de la main droite : il suit le bras.
+func _attach_weapon() -> void:
+	if _hand_r < 0:
+		return
+	var att := BoneAttachment3D.new()
+	_skel.add_child(att)
+	att.bone_idx = _hand_r
+	var pipe := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.022
+	cyl.bottom_radius = 0.027
+	cyl.height = 0.8
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.35, 0.34, 0.32)
+	mat.metallic = 0.85
+	mat.roughness = 0.45
+	cyl.material = mat
+	pipe.mesh = cyl
+	# Prise marteau : l'axe du tuyau suit le pouce (X local de la main),
+	# décalé pour que la majeure partie dépasse au-dessus du poing.
+	pipe.rotation.z = -PI / 2.0
+	pipe.position = Vector3(0.2, -0.02, 0.0)
+	att.add_child(pipe)
+
+
+## Applique une rotation (espace global squelette) par-dessus la pose de
+## repos. La compensation parent utilise le rest : pour les avant-bras, la
+## flexion reste donc relative au bras déjà posé (le coude suit l'épaule).
+func _pose_bone(idx: int, extra: Quaternion) -> void:
 	if idx < 0:
 		return
 	var parent := _skel.get_bone_parent(idx)
 	var parent_rot := _skel.get_bone_global_rest(parent).basis.get_rotation_quaternion()
 	var rest := _skel.get_bone_global_rest(idx).basis.get_rotation_quaternion()
-	var q := Quaternion(Vector3(1, 0, 0), pitch) * Quaternion(Vector3(0, 0, 1), lower) * rest
-	_skel.set_bone_pose_rotation(idx, parent_rot.inverse() * q)
+	_skel.set_bone_pose_rotation(idx, parent_rot.inverse() * (extra * rest))
+
+
+func _arm_quat(lower: float, pitch: float) -> Quaternion:
+	return Quaternion(Vector3(1, 0, 0), pitch) * Quaternion(Vector3(0, 0, 1), lower)
 
 
 func _update_arm_pose(swing: float) -> void:
@@ -122,8 +164,13 @@ func _update_arm_pose(swing: float) -> void:
 		return
 	# Les bras suivent légèrement le regard vertical.
 	var view_pitch := head.rotation.x * 0.6
-	_pose_arm(_bone_l, -ARM_LOWER, ARM_PITCH + view_pitch + swing)
-	_pose_arm(_bone_r, ARM_LOWER, ARM_PITCH + view_pitch - swing)
+	# Bras gauche : ballant, balancement de marche complet.
+	_pose_bone(_bone_l, _arm_quat(-L_LOWER, L_PITCH + view_pitch + swing))
+	_pose_bone(_fore_l, Quaternion(Vector3(0, 1, 0), L_BEND))
+	# Bras droit : garde arme, balancement réduit + animation de frappe.
+	_pose_bone(_bone_r, _arm_quat(R_LOWER,
+			R_PITCH + view_pitch - swing * 0.25 + _atk_pitch))
+	_pose_bone(_fore_r, Quaternion(Vector3(0, 1, 0), R_BEND + _atk_bend))
 
 
 func _physics_process(delta: float) -> void:
@@ -194,16 +241,19 @@ func _try_attack() -> void:
 	stamina_changed.emit(stamina)
 	if _swing_tween != null and _swing_tween.is_valid():
 		_swing_tween.kill()
-	_weapon_pivot.rotation = Vector3(-1.0, 0.0, 0.0)
-	_swing_tween = create_tween()
-	# Armé en arrière, frappe en travers, retour à la garde.
-	_swing_tween.tween_property(_weapon_pivot, "rotation", Vector3(-1.7, 0.0, 0.45), 0.09) \
+	# Frappe animée sur le bras droit : armé au-dessus de l'épaule,
+	# coup descendant bras tendu, puis retour en garde.
+	_swing_tween = create_tween().set_parallel(true)
+	_swing_tween.tween_property(self, "_atk_pitch", -0.7, 0.09) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_swing_tween.tween_property(_weapon_pivot, "rotation", Vector3(-0.15, -0.25, -0.55), 0.11) \
+	_swing_tween.tween_property(self, "_atk_bend", 0.45, 0.09)
+	_swing_tween.chain().tween_property(self, "_atk_pitch", 1.15, 0.11) \
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	_swing_tween.tween_callback(_apply_hit)
-	_swing_tween.tween_property(_weapon_pivot, "rotation", Vector3(-1.0, 0.0, 0.0), 0.3) \
+	_swing_tween.parallel().tween_property(self, "_atk_bend", -1.1, 0.11)
+	_swing_tween.chain().tween_callback(_apply_hit)
+	_swing_tween.chain().tween_property(self, "_atk_pitch", 0.0, 0.32) \
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_swing_tween.parallel().tween_property(self, "_atk_bend", 0.0, 0.32)
 
 
 ## Coup porté : sphère devant la caméra sur le layer monstres (4).
