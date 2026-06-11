@@ -20,8 +20,10 @@ const W := 31
 const H := 31
 const WALL_T := 0.25
 const PACK := "res://assets/BackroomsLikeAssetRe_Godot/LoafbrrAssets/BackroomsLikeAsset2/Scenes/"
-const ROOM_COUNT := 9
-const BRAID_RATIO := 0.4
+const ROOM_COUNT := 5
+const HALL_COUNT := 3
+const CORRIDOR_COUNT := 9
+const BRAID_RATIO := 0.6
 const WALL_B_RATIO := 0.15
 
 var spawn_cell := Vector2i(2, 2)
@@ -106,12 +108,31 @@ func _generate_layout() -> void:
 
 	# Salles ouvertes (la première autour du spawn), piliers ajoutés au rendu.
 	_carve_room(Rect2i(spawn_cell.x - 1, spawn_cell.y - 1, 3, 3))
+	# Grands halls à piliers : l'identité visuelle des backrooms.
+	for i in HALL_COUNT:
+		var hw := randi_range(6, 9)
+		var hh := randi_range(5, 8)
+		_carve_room(Rect2i(randi_range(1, W - hw - 1), randi_range(1, H - hh - 1), hw, hh))
 	for i in ROOM_COUNT:
 		var rw := randi_range(3, 5)
 		var rh := randi_range(3, 5)
 		var rx := randi_range(1, W - rw - 1)
 		var ry := randi_range(1, H - rh - 1)
 		_carve_room(Rect2i(rx, ry, rw, rh))
+
+	# Longs couloirs droits (parfois larges de 2 cellules) : casse l'effet
+	# "labyrinthe de jardin" au profit de l'étage de bureaux infini.
+	for i in CORRIDOR_COUNT:
+		var length := randi_range(8, 18)
+		var width := 2 if randf() < 0.35 else 1
+		if randf() < 0.5:
+			var x := randi_range(1, maxi(1, W - length - 1))
+			var y := randi_range(1, H - width - 1)
+			_carve_room(Rect2i(x, y, mini(length, W - 1 - x), width))
+		else:
+			var x := randi_range(1, W - width - 1)
+			var y := randi_range(1, maxi(1, H - length - 1))
+			_carve_room(Rect2i(x, y, width, mini(length, H - 1 - y)))
 
 	# Braiding : ouvre une partie des culs-de-sac pour créer des boucles.
 	for x in W:
@@ -337,6 +358,20 @@ const SCRAWLS: Array[String] = [
 	"DERRIÈRE TOI ?",
 ]
 
+const PHOTO_DIR := "res://assets/images/"
+const POSTER_COUNT := 14
+## Messages écrits au sang près des affiches de disparus.
+const PHOTO_MESSAGES: Array[String] = [
+	"TU L'AS VU ?",
+	"ILS ÉTAIENT QUATRE",
+	"ELLE SOURIT ENCORE",
+	"IL NE CLIGNE JAMAIS DES YEUX",
+	"NE LEUR PARLE PAS",
+	"C'ÉTAIT MON AMI",
+	"ILS ME SUIVENT",
+	"CE N'EST PLUS LUI",
+]
+
 
 func _place_props(root: Node3D) -> void:
 	_place_guide_arrows(root)
@@ -350,7 +385,137 @@ func _place_props(root: Node3D) -> void:
 	for i in 10:
 		var c := Vector2i(randi_range(1, W - 2), randi_range(1, H - 2))
 		_place_scrawl(root, c, SCRAWLS[randi() % SCRAWLS.size()])
+	_place_photos(root)
 	_place_almond_water(root)
+
+
+## Affiches "DISPARU" : les photos de assets/images placardées au hasard sur
+## les murs, avec un message au sang (et ses coulures) sur un mur tout proche.
+func _place_photos(root: Node3D) -> void:
+	var textures := _load_photo_textures()
+	if textures.is_empty():
+		return
+	for i in POSTER_COUNT:
+		var c := Vector2i(randi_range(1, W - 2), randi_range(1, H - 2))
+		if Vector2(c - spawn_cell).length() < 3.0 or c == key_cell or c == exit_cell:
+			continue
+		var anchor := _wall_anchor(c, randf_range(1.4, 1.6))
+		if anchor == Transform3D.IDENTITY:
+			continue
+		root.add_child(_make_poster(textures[i % textures.size()], anchor))
+		# Le message au sang : sur la même cellule ou une voisine accessible.
+		var msg_cell := c
+		if randf() < 0.6:
+			msg_cell = _neighbor_towards(c,
+					Vector2i(randi_range(0, W - 1), randi_range(0, H - 1)))
+		_place_blood_message(root, msg_cell,
+				PHOTO_MESSAGES[randi() % PHOTO_MESSAGES.size()])
+
+
+## Charge toutes les images du dossier (les `.import` listés par DirAccess
+## dans un build exporté sont ramenés au nom de la ressource).
+func _load_photo_textures() -> Array[Texture2D]:
+	var result: Array[Texture2D] = []
+	var dir := DirAccess.open(PHOTO_DIR)
+	if dir == null:
+		return result
+	var seen := {}
+	for f in dir.get_files():
+		var fname := f.trim_suffix(".import")
+		if seen.has(fname):
+			continue
+		seen[fname] = true
+		if not fname.get_extension().to_lower() in ["png", "jpg", "jpeg", "webp"]:
+			continue
+		var tex := load(PHOTO_DIR + fname)
+		if tex is Texture2D:
+			result.append(tex)
+	result.shuffle()
+	return result
+
+
+func _make_poster(tex: Texture2D, anchor: Transform3D) -> Node3D:
+	var poster := Node3D.new()
+	poster.transform = anchor
+	poster.add_to_group("photo_posters")
+	# Légèrement de travers, comme scotchée à la va-vite.
+	poster.rotate_object_local(Vector3.FORWARD, randf_range(-0.07, 0.07))
+
+	var paper := MeshInstance3D.new()
+	var pm := QuadMesh.new()
+	pm.size = Vector2(0.42, 0.58)
+	var pmat := StandardMaterial3D.new()
+	pmat.albedo_color = Color(0.87, 0.85, 0.76)
+	pmat.emission_enabled = true
+	pmat.emission = Color(0.87, 0.85, 0.76)
+	pmat.emission_energy_multiplier = 0.10
+	pmat.roughness = 0.95
+	pm.material = pmat
+	paper.mesh = pm
+	poster.add_child(paper)
+
+	var header := Label3D.new()
+	header.text = "DISPARU"
+	header.font_size = 60
+	header.pixel_size = 0.0021
+	header.modulate = Color(0.14, 0.11, 0.1)
+	header.position = Vector3(0, 0.235, 0.004)
+	poster.add_child(header)
+
+	var photo := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	var pw := 0.3
+	var ph := clampf(pw * float(tex.get_height()) / maxf(float(tex.get_width()), 1.0),
+			0.22, 0.38)
+	qm.size = Vector2(pw, ph)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.emission_enabled = true
+	mat.emission_texture = tex
+	mat.emission_energy_multiplier = 0.08
+	mat.roughness = 0.9
+	qm.material = mat
+	photo.mesh = qm
+	photo.position = Vector3(0, -0.01, 0.004)
+	poster.add_child(photo)
+
+	var footer := Label3D.new()
+	footer.text = "VU POUR LA DERNIÈRE FOIS : NIVEAU 0"
+	footer.font_size = 30
+	footer.pixel_size = 0.0011
+	footer.modulate = Color(0.2, 0.16, 0.15)
+	footer.position = Vector3(0, -0.245, 0.004)
+	poster.add_child(footer)
+	return poster
+
+
+## Message écrit au sang, avec des coulures qui dégoulinent sous les lettres.
+func _place_blood_message(root: Node3D, cell: Vector2i, text: String) -> void:
+	var anchor := _wall_anchor(cell, randf_range(1.45, 1.85))
+	if anchor == Transform3D.IDENTITY:
+		return
+	var label := Label3D.new()
+	label.text = text
+	label.font_size = 68
+	label.pixel_size = 0.0042
+	label.modulate = Color(0.5, 0.05, 0.03, 0.95)
+	label.transform = anchor
+	root.add_child(label)
+
+	var drip_mat := StandardMaterial3D.new()
+	drip_mat.albedo_color = Color(0.42, 0.03, 0.02, 0.88)
+	drip_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	drip_mat.roughness = 0.55
+	for i in randi_range(3, 6):
+		var dm := QuadMesh.new()
+		dm.size = Vector2(randf_range(0.012, 0.032), randf_range(0.12, 0.42))
+		dm.material = drip_mat
+		var drip := MeshInstance3D.new()
+		drip.mesh = dm
+		drip.transform = anchor
+		drip.translate_object_local(Vector3(randf_range(-0.55, 0.55),
+				-0.1 - dm.size.y / 2.0, 0.001))
+		root.add_child(drip)
 
 
 ## Bouteilles d'eau d'amande (lore Backrooms) : soignent le joueur.

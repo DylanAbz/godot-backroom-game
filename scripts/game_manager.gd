@@ -319,6 +319,16 @@ func _screenshot_flow() -> void:
 		await get_tree().create_timer(0.4).timeout
 		await _capture("shot_key.png")
 		player.head.rotation.x = 0.0
+		# Vérification d'une affiche "DISPARU" et de son message au sang.
+		var posters := get_tree().get_nodes_in_group("photo_posters")
+		if not posters.is_empty():
+			var poster: Node3D = posters[randi() % posters.size()]
+			var facing: Vector3 = poster.global_transform.basis.z
+			player.global_position = Vector3(poster.global_position.x, 0.3,
+					poster.global_position.z) + facing * 1.6
+			player.rotation.y = atan2(facing.x, facing.z)
+			await get_tree().create_timer(0.4).timeout
+			await _capture("shot_poster.png")
 	# Vérification du portail : téléporte le joueur devant.
 	for i in 600:
 		if portal != null:
