@@ -10,6 +10,7 @@ signal health_changed(value: float)
 signal stamina_changed(value: float)
 signal damaged
 signal died
+signal focus_changed(prompt: String)
 
 const WALK_SPEED := 3.6
 const SPRINT_SPEED := 6.4
@@ -18,6 +19,7 @@ const ACCEL := 10.0
 const MOUSE_SENS := 0.0022
 const STAMINA_DRAIN := 16.0
 const STAMINA_REGEN := 11.0
+const INTERACT_DIST := 2.6
 
 # Pose des bras : abaissés depuis la T-pose puis ramenés vers l'avant.
 const ARM_LOWER := 1.05
@@ -31,6 +33,7 @@ var dead := false
 var _skel: Skeleton3D
 var _bone_l := -1
 var _bone_r := -1
+var _focus: Interactable
 var _sway_t := 0.0
 var _bob_t := 0.0
 var _cam_base_y := 0.0
@@ -130,6 +133,22 @@ func _physics_process(delta: float) -> void:
 		camera.rotation.z = lerpf(camera.rotation.z, 0.0, 6.0 * delta)
 	var swing_amp := ARM_SWING_AMP * clampf(planar / SPRINT_SPEED, 0.0, 1.0)
 	_update_arm_pose(sin(_sway_t) * swing_amp)
+	_interact_scan()
+
+
+## Raycast du regard vers les Interactable (layer 8). Le layer monde (1) est
+## inclus pour que les murs bloquent la visée à travers les cloisons.
+func _interact_scan() -> void:
+	var from := camera.global_position
+	var to := from - camera.global_transform.basis.z * INTERACT_DIST
+	var query := PhysicsRayQueryParameters3D.create(from, to, 1 | 8)
+	query.collide_with_areas = true
+	var result := get_world_3d().direct_space_state.intersect_ray(query)
+	var hit: Node = result.get("collider")
+	var target := hit as Interactable
+	if target != _focus:
+		_focus = target
+		focus_changed.emit(_focus.prompt if _focus != null else "")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -143,6 +162,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed("flashlight") and not dead:
 		flashlight.visible = not flashlight.visible
+	elif event.is_action_pressed("interact") and not dead:
+		if _focus != null and is_instance_valid(_focus):
+			_focus.interact(self)
 
 
 func take_damage(amount: float) -> void:

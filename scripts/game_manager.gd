@@ -26,6 +26,8 @@ var game_over := false
 
 var _lights: Array[Dictionary] = []
 var _screenshot_mode := false
+var _portal_mat: StandardMaterial3D
+var _portal_light: OmniLight3D
 
 
 func _ready() -> void:
@@ -74,6 +76,9 @@ func _load_level() -> void:
 		level.model_path = info["path"]
 	level.collisions_ready.connect(_on_collisions_ready, CONNECT_ONE_SHOT)
 	level.nav_ready.connect(_on_nav_ready, CONNECT_ONE_SHOT)
+	if level is MazeLevel:
+		level.note_read.connect(func(text: String) -> void: hud.show_note(text))
+		level.key_taken.connect(_on_key_taken)
 	add_child(level)
 
 
@@ -85,11 +90,16 @@ func _on_collisions_ready() -> void:
 		player.stamina_changed.connect(hud.set_stamina)
 		player.damaged.connect(hud.flash_damage)
 		player.died.connect(_on_player_died)
+		player.focus_changed.connect(hud.set_prompt)
 		spawner.player = player
 	player.global_position = SPAWN_POS
 	player.velocity = Vector3.ZERO
 	spawner.active = true
 	hud.show_level_name(LEVELS[level_index]["name"])
+	if level is MazeLevel:
+		hud.set_objective("Suivez les flèches jaunes · La clé est sous la lumière rouge")
+	else:
+		hud.set_objective("Trouvez le portail de sortie")
 	if _screenshot_mode:
 		_screenshot_mode = false
 		_screenshot_flow()
@@ -135,28 +145,48 @@ func _place_portal() -> void:
 	var mesh := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(1.2, 2.2, 0.25)
-	var mat := StandardMaterial3D.new()
-	mat.emission_enabled = true
-	mat.emission = Color(0.85, 1.0, 0.9)
-	mat.emission_energy_multiplier = 2.5
-	mat.albedo_color = Color(0.1, 0.12, 0.1)
-	bm.material = mat
+	_portal_mat = StandardMaterial3D.new()
+	_portal_mat.emission_enabled = true
+	_portal_mat.emission = Color(0.85, 1.0, 0.9)
+	_portal_mat.emission_energy_multiplier = 2.5
+	_portal_mat.albedo_color = Color(0.1, 0.12, 0.1)
+	bm.material = _portal_mat
 	mesh.mesh = bm
 	mesh.position.y = 1.1
 	portal.add_child(mesh)
-	var light := OmniLight3D.new()
-	light.light_color = Color(0.7, 1.0, 0.85)
-	light.light_energy = 2.0
-	light.omni_range = 8.0
-	light.position.y = 1.5
-	portal.add_child(light)
+	_portal_light = OmniLight3D.new()
+	_portal_light.light_color = Color(0.7, 1.0, 0.85)
+	_portal_light.light_energy = 2.0
+	_portal_light.omni_range = 8.0
+	_portal_light.position.y = 1.5
+	portal.add_child(_portal_light)
 	portal.body_entered.connect(_on_portal_entered)
 	add_child(portal)
 	portal.global_position = best
+	if level is MazeLevel and not level.key_collected:
+		# Porte verrouillée : lueur rouge tant que la clé n'est pas trouvée.
+		_portal_mat.emission = Color(1.0, 0.25, 0.18)
+		_portal_mat.emission_energy_multiplier = 1.2
+		_portal_light.light_color = Color(1.0, 0.3, 0.2)
+		_portal_light.light_energy = 1.2
+
+
+func _on_key_taken() -> void:
+	hud.show_toast("Vous avez la clé ! Retournez à la porte SORTIE.")
+	hud.set_objective("Suivez les flèches jaunes jusqu'à la porte SORTIE")
+	if _portal_mat != null:
+		_portal_mat.emission = Color(0.85, 1.0, 0.9)
+		_portal_mat.emission_energy_multiplier = 2.5
+	if _portal_light != null and is_instance_valid(_portal_light):
+		_portal_light.light_color = Color(0.7, 1.0, 0.85)
+		_portal_light.light_energy = 2.0
 
 
 func _on_portal_entered(body: Node3D) -> void:
 	if body != player or game_over:
+		return
+	if level is MazeLevel and not level.key_collected:
+		hud.show_toast("La porte est verrouillée. Trouvez la clé sous la lumière rouge.")
 		return
 	level_index += 1
 	if level_index >= LEVELS.size():
@@ -239,6 +269,14 @@ func _screenshot_flow() -> void:
 	spawner.spawn_at(player.global_position + fwd * 5.0, 0)
 	await get_tree().create_timer(1.2).timeout
 	await _capture("shot_monster.png")
+	if level is MazeLevel:
+		var key_pos: Vector3 = level.cell_center(level.key_cell)
+		player.global_position = key_pos + Vector3(0, 0.3, 2.5)
+		player.rotation.y = 0.0
+		player.head.rotation.x = -0.15
+		await get_tree().create_timer(0.4).timeout
+		await _capture("shot_key.png")
+		player.head.rotation.x = 0.0
 	# Vérification du portail : téléporte le joueur devant.
 	for i in 600:
 		if portal != null:
