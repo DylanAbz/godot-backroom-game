@@ -12,9 +12,13 @@ const ATTACK_COOLDOWN := 1.3
 
 var cfg := {}
 var player: PlayerController
+var health := 90.0
 
 var _agent: NavigationAgent3D
 var _anim: AnimationPlayer
+var _model: Node3D
+var _dying := false
+var _stagger := 0.0
 var _speed := 4.0
 var _floats := false
 var _hover := 1.3
@@ -35,9 +39,11 @@ func _ready() -> void:
 	_speed = cfg.get("speed", 4.0) * randf_range(0.9, 1.1)
 	_floats = cfg.get("floats", false)
 	_hover = cfg.get("hover", 1.3)
+	health = cfg.get("hp", 90.0)
 	_bob_phase = randf() * TAU
 
 	var model: Node3D = load(cfg["model"]).instantiate()
+	_model = model
 	add_child(model)
 	var aabb := combined_aabb(model)
 	var target_h: float = cfg.get("height", 2.0)
@@ -74,8 +80,45 @@ func _ready() -> void:
 			_anim.play(list[0])
 
 
+## Coup reçu : dégâts, recul et bref étourdissement ; mort en dessous de 0.
+func take_hit(damage: float, knockback: Vector3) -> void:
+	if _dying:
+		return
+	health -= damage
+	_stagger = 0.45
+	velocity += knockback
+	if health <= 0.0:
+		_die()
+
+
+func _die() -> void:
+	_dying = true
+	collision_layer = 0
+	collision_mask = 0
+	set_physics_process(false)
+	if _anim != null:
+		_anim.stop()
+	# Effondrement : le modèle s'affaisse dans le sol puis disparaît.
+	var tween := create_tween()
+	tween.set_parallel(true)
+	if _model != null:
+		tween.tween_property(_model, "scale", _model.scale * Vector3(1.1, 0.04, 1.1), 0.55) \
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	tween.chain().tween_interval(0.25)
+	tween.chain().tween_callback(queue_free)
+
+
 func _physics_process(delta: float) -> void:
 	_attack_cd = maxf(_attack_cd - delta, 0.0)
+	if _stagger > 0.0:
+		# Sonné : subit le recul avec friction, sans poursuivre.
+		_stagger -= delta
+		velocity.x = move_toward(velocity.x, 0.0, 10.0 * delta)
+		velocity.z = move_toward(velocity.z, 0.0, 10.0 * delta)
+		if not _floats and not is_on_floor():
+			velocity.y -= _gravity * delta
+		move_and_slide()
+		return
 	var hunting := player != null and is_instance_valid(player) and not player.dead
 	var dist := INF
 	if hunting:

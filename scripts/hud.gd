@@ -118,7 +118,7 @@ func _ready() -> void:
 
 	# Rappel des contrôles en bas à droite.
 	var controls := Label.new()
-	controls.text = "ZQSD se déplacer · Maj courir · Espace sauter · F lampe · E interagir"
+	controls.text = "ZQSD se déplacer · Maj courir · Espace sauter · F lampe · E interagir · Clic frapper"
 	controls.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	controls.offset_left = -520
 	controls.offset_top = -40

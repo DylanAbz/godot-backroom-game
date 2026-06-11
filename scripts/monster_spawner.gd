@@ -6,12 +6,12 @@ extends Node3D
 ## exclus : ce sont des personnages jouables.
 
 const TYPES := [
-	{"model": "res://assets/character/partygoer_from_backrooms.glb", "height": 2.1, "speed": 4.2},
-	{"model": "res://assets/character/bacteria_-_kane_pixels_backrooms.glb", "height": 2.4, "speed": 2.9},
-	{"model": "res://assets/character/kitty_-_backrooms_entity.glb", "height": 2.0, "speed": 5.3},
-	{"model": "res://assets/character/smiler_backrooms.glb", "height": 1.1, "speed": 3.8, "floats": true, "hover": 1.3},
-	{"model": "res://assets/character/backrooms_smiler_rig.glb", "height": 1.7, "speed": 4.5},
-	{"model": "res://assets/character/smiler_entity3_backrooms.glb", "height": 0.9, "speed": 4.8, "floats": true, "hover": 1.4},
+	{"model": "res://assets/character/partygoer_from_backrooms.glb", "height": 2.1, "speed": 4.2, "hp": 110.0},
+	{"model": "res://assets/character/bacteria_-_kane_pixels_backrooms.glb", "height": 2.4, "speed": 2.9, "hp": 170.0},
+	{"model": "res://assets/character/kitty_-_backrooms_entity.glb", "height": 2.0, "speed": 5.3, "hp": 70.0},
+	{"model": "res://assets/character/smiler_backrooms.glb", "height": 1.1, "speed": 3.8, "floats": true, "hover": 1.3, "hp": 80.0},
+	{"model": "res://assets/character/backrooms_smiler_rig.glb", "height": 1.7, "speed": 4.5, "hp": 95.0},
+	{"model": "res://assets/character/smiler_entity3_backrooms.glb", "height": 0.9, "speed": 4.8, "floats": true, "hover": 1.4, "hp": 60.0},
 ]
 
 const MAX_MONSTERS := 5
@@ -34,7 +34,13 @@ func _physics_process(delta: float) -> void:
 
 
 func _try_spawn() -> void:
-	monsters = monsters.filter(func(m: Monster) -> bool: return is_instance_valid(m))
+	# Pas de filter() typé ici : les instances libérées (mortes/despawn) ne
+	# peuvent plus être converties en Monster par le lambda.
+	var alive: Array[Monster] = []
+	for m in monsters:
+		if is_instance_valid(m):
+			alive.append(m)
+	monsters = alive
 	if monsters.size() >= MAX_MONSTERS:
 		return
 	for attempt in 8:

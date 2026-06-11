@@ -21,6 +21,13 @@ const STAMINA_DRAIN := 16.0
 const STAMINA_REGEN := 11.0
 const INTERACT_DIST := 2.6
 
+const ATTACK_DAMAGE := 35.0
+const ATTACK_REACH := 1.4
+const ATTACK_RADIUS := 1.15
+const ATTACK_COOLDOWN := 0.65
+const ATTACK_STAMINA := 7.0
+const ATTACK_KNOCKBACK := 7.0
+
 # Pose des bras : abaissés depuis la T-pose puis ramenés vers l'avant.
 const ARM_LOWER := 1.05
 const ARM_PITCH := -0.7
@@ -34,6 +41,9 @@ var _skel: Skeleton3D
 var _bone_l := -1
 var _bone_r := -1
 var _focus: Interactable
+var _weapon_pivot: Node3D
+var _attack_cd := 0.0
+var _swing_tween: Tween
 var _sway_t := 0.0
 var _bob_t := 0.0
 var _cam_base_y := 0.0
@@ -48,6 +58,28 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_cam_base_y = camera.position.y
 	_build_body_model()
+	_build_weapon()
+
+
+## Tuyau de plomberie tenu à droite de la caméra (viewmodel FPS).
+func _build_weapon() -> void:
+	_weapon_pivot = Node3D.new()
+	_weapon_pivot.position = Vector3(0.3, -0.32, -0.5)
+	_weapon_pivot.rotation.x = -1.0
+	head.add_child(_weapon_pivot)
+	var pipe := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.024
+	cyl.bottom_radius = 0.028
+	cyl.height = 0.85
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.35, 0.34, 0.32)
+	mat.metallic = 0.85
+	mat.roughness = 0.45
+	cyl.material = mat
+	pipe.mesh = cyl
+	pipe.position.y = 0.3
+	_weapon_pivot.add_child(pipe)
 
 
 func _build_body_model() -> void:
@@ -133,7 +165,47 @@ func _physics_process(delta: float) -> void:
 		camera.rotation.z = lerpf(camera.rotation.z, 0.0, 6.0 * delta)
 	var swing_amp := ARM_SWING_AMP * clampf(planar / SPRINT_SPEED, 0.0, 1.0)
 	_update_arm_pose(sin(_sway_t) * swing_amp)
+	_attack_cd = maxf(_attack_cd - delta, 0.0)
 	_interact_scan()
+
+
+func _try_attack() -> void:
+	if _attack_cd > 0.0 or stamina < ATTACK_STAMINA:
+		return
+	_attack_cd = ATTACK_COOLDOWN
+	stamina -= ATTACK_STAMINA
+	stamina_changed.emit(stamina)
+	if _swing_tween != null and _swing_tween.is_valid():
+		_swing_tween.kill()
+	_weapon_pivot.rotation = Vector3(-1.0, 0.0, 0.0)
+	_swing_tween = create_tween()
+	# Armé en arrière, frappe en travers, retour à la garde.
+	_swing_tween.tween_property(_weapon_pivot, "rotation", Vector3(-1.7, 0.0, 0.45), 0.09) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_swing_tween.tween_property(_weapon_pivot, "rotation", Vector3(-0.15, -0.25, -0.55), 0.11) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_swing_tween.tween_callback(_apply_hit)
+	_swing_tween.tween_property(_weapon_pivot, "rotation", Vector3(-1.0, 0.0, 0.0), 0.3) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
+## Coup porté : sphère devant la caméra sur le layer monstres (4).
+func _apply_hit() -> void:
+	var center := camera.global_position - camera.global_transform.basis.z * ATTACK_REACH
+	var shape := SphereShape3D.new()
+	shape.radius = ATTACK_RADIUS
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, center)
+	query.collision_mask = 4
+	for hit in get_world_3d().direct_space_state.intersect_shape(query, 6):
+		var monster := hit.get("collider") as Monster
+		if monster == null:
+			continue
+		var dir := monster.global_position - global_position
+		dir.y = 0.0
+		dir = dir.normalized() if dir.length() > 0.01 else -global_transform.basis.z
+		monster.take_hit(ATTACK_DAMAGE, dir * ATTACK_KNOCKBACK + Vector3(0, 1.5, 0))
 
 
 ## Raycast du regard vers les Interactable (layer 8). Le layer monde (1) est
@@ -165,6 +237,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("interact") and not dead:
 		if _focus != null and is_instance_valid(_focus):
 			_focus.interact(self)
+	elif event.is_action_pressed("attack") and not dead \
+			and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		_try_attack()
 
 
 func take_damage(amount: float) -> void:

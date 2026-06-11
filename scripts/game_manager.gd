@@ -269,6 +269,19 @@ func _screenshot_flow() -> void:
 	spawner.spawn_at(player.global_position + fwd * 5.0, 0)
 	await get_tree().create_timer(1.2).timeout
 	await _capture("shot_monster.png")
+	# Vérification du combat : un coup de tuyau sur un monstre proche.
+	var victim := spawner.spawn_at(player.global_position + fwd * 1.8, 2)
+	await get_tree().create_timer(0.4).timeout
+	player._try_attack()
+	await get_tree().create_timer(0.18).timeout
+	await _capture("shot_combat.png")
+	player._try_attack()
+	await get_tree().create_timer(0.8).timeout
+	player._try_attack()
+	await get_tree().create_timer(0.5).timeout
+	await _capture("shot_combat_kill.png")
+	if is_instance_valid(victim):
+		victim.queue_free()
 	if level is MazeLevel:
 		var key_pos: Vector3 = level.cell_center(level.key_cell)
 		player.global_position = key_pos + Vector3(0, 0.3, 2.5)
