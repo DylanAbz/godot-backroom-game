@@ -13,6 +13,7 @@ extends LevelRoot
 
 signal note_read(text: String)
 signal key_taken
+signal water_drunk
 
 const CELL := 3.0
 const W := 31
@@ -349,6 +350,36 @@ func _place_props(root: Node3D) -> void:
 	for i in 10:
 		var c := Vector2i(randi_range(1, W - 2), randi_range(1, H - 2))
 		_place_scrawl(root, c, SCRAWLS[randi() % SCRAWLS.size()])
+	_place_almond_water(root)
+
+
+## Bouteilles d'eau d'amande (lore Backrooms) : soignent le joueur.
+func _place_almond_water(root: Node3D) -> void:
+	var bottle_mesh := CylinderMesh.new()
+	bottle_mesh.top_radius = 0.04
+	bottle_mesh.bottom_radius = 0.055
+	bottle_mesh.height = 0.28
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.85, 0.92, 1.0, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(0.7, 0.85, 1.0)
+	mat.emission_energy_multiplier = 0.45
+	bottle_mesh.material = mat
+	for i in 8:
+		var c := Vector2i(randi_range(1, W - 2), randi_range(1, H - 2))
+		if Vector2(c - spawn_cell).length() < 4.0 or c == key_cell or c == exit_cell:
+			continue
+		var bottle := Interactable.create("E — Boire l'eau d'amande", 0.65, true)
+		var mi := MeshInstance3D.new()
+		mi.mesh = bottle_mesh
+		bottle.add_child(mi)
+		# Posée au sol, légèrement décalée du centre du couloir.
+		bottle.position = cell_center(c) \
+				+ Vector3(randf_range(-0.8, 0.8), 0.14, randf_range(-0.8, 0.8))
+		bottle.used.connect(func(p: PlayerController) -> void:
+			p.heal(35.0)
+			water_drunk.emit())
+		root.add_child(bottle)
 
 
 ## Flèches jaunes peintes au sol le long du chemin spawn → sortie.

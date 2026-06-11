@@ -47,6 +47,8 @@ var _swing_tween: Tween
 var _sway_t := 0.0
 var _bob_t := 0.0
 var _cam_base_y := 0.0
+var _fov_base := 75.0
+var _shake := 0.0
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 @onready var head: Node3D = $Head
@@ -57,6 +59,7 @@ var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_cam_base_y = camera.position.y
+	_fov_base = camera.fov
 	_build_body_model()
 	_build_weapon()
 
@@ -166,6 +169,20 @@ func _physics_process(delta: float) -> void:
 	var swing_amp := ARM_SWING_AMP * clampf(planar / SPRINT_SPEED, 0.0, 1.0)
 	_update_arm_pose(sin(_sway_t) * swing_amp)
 	_attack_cd = maxf(_attack_cd - delta, 0.0)
+
+	# Sensation de vitesse : le champ de vision s'élargit au sprint.
+	var target_fov := _fov_base + (8.0 if sprinting else 0.0)
+	camera.fov = lerpf(camera.fov, target_fov, 5.0 * delta)
+
+	# Secousse de caméra décroissante après un coup reçu.
+	if _shake > 0.0:
+		_shake = maxf(_shake - delta * 3.0, 0.0)
+		camera.h_offset = randf_range(-1, 1) * _shake * 0.04
+		camera.v_offset = randf_range(-1, 1) * _shake * 0.04
+	else:
+		camera.h_offset = 0.0
+		camera.v_offset = 0.0
+
 	_interact_scan()
 
 
@@ -242,12 +259,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		_try_attack()
 
 
+func heal(amount: float) -> void:
+	if dead:
+		return
+	health = minf(health + amount, 100.0)
+	health_changed.emit(health)
+
+
 func take_damage(amount: float) -> void:
 	if dead:
 		return
 	health = maxf(health - amount, 0.0)
 	health_changed.emit(health)
 	damaged.emit()
+	_shake = 1.0
 	if health <= 0.0:
 		dead = true
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

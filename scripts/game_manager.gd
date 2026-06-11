@@ -79,6 +79,8 @@ func _load_level() -> void:
 	if level is MazeLevel:
 		level.note_read.connect(func(text: String) -> void: hud.show_note(text))
 		level.key_taken.connect(_on_key_taken)
+		level.water_drunk.connect(
+				func() -> void: hud.show_toast("L'eau d'amande vous apaise. (+35 PV)"))
 	add_child(level)
 
 
