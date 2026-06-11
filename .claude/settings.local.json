@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\frabb\\\\Documents\\\\MyDigitalSchool\\\\S8\\\\Backroom\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(& \"$env:USERPROFILE\\\\Downloads\\\\Godot_v4.6.3-stable_win64.exe\\\\Godot_v4.6.3-stable_win64_console.exe\" --headless --path . -s tools/inspect_glb.gd)",
+      "PowerShell(& \"$env:USERPROFILE\\\\Downloads\\\\Godot_v4.6.3-stable_win64.exe\\\\Godot_v4.6.3-stable_win64_console.exe\" --headless --path . -s tools/inspect_hazmat.gd)",
+      "PowerShell(& \"$env:USERPROFILE\\\\Downloads\\\\Godot_v4.6.3-stable_win64.exe\\\\Godot_v4.6.3-stable_win64_console.exe\" --headless --path . --import)",
+      "PowerShell(& \"$env:USERPROFILE\\\\Downloads\\\\Godot_v4.6.3-stable_win64.exe\\\\Godot_v4.6.3-stable_win64_console.exe\" --path . --resolution 1280x720 -- --screenshot)",
+      "PowerShell(& \"$env:USERPROFILE\\\\Downloads\\\\Godot_v4.6.3-stable_win64.exe\\\\Godot_v4.6.3-stable_win64_console.exe\" --headless --path . -s tools/test_nav.gd)"
+    ]
+  }
+}
