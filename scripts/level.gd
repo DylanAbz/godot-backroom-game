@@ -9,6 +9,9 @@ signal nav_ready
 
 var model_path := ""
 var nav_region: NavigationRegion3D
+## Position imposée de la sortie (les niveaux générés la fixent) ;
+## Vector3.INF = laisser GameManager choisir un point aléatoire du navmesh.
+var exit_hint := Vector3.INF
 
 
 func _ready() -> void:
@@ -19,11 +22,9 @@ func _ready() -> void:
 func _build() -> void:
 	nav_region = NavigationRegion3D.new()
 	add_child(nav_region)
-	var model: Node3D = load(model_path).instantiate()
-	nav_region.add_child(model)
-
-	for mi: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
-		mi.create_trimesh_collision()
+	var content := _create_content()
+	nav_region.add_child(content)
+	_setup_collisions(content)
 	collisions_ready.emit()
 
 	# Indispensable : baker dans la même frame que la création des colliders
@@ -43,3 +44,15 @@ func _build() -> void:
 	nav_region.navigation_mesh = nm
 	nav_region.bake_finished.connect(func() -> void: nav_ready.emit())
 	nav_region.bake_navigation_mesh(true)
+
+
+## Construit le contenu du niveau. Surchargé par les niveaux générés en code.
+func _create_content() -> Node3D:
+	return load(model_path).instantiate()
+
+
+## Génère les collisions. Les niveaux générés créent les leurs dans
+## _create_content() et surchargent ceci par un no-op.
+func _setup_collisions(content: Node3D) -> void:
+	for mi: MeshInstance3D in content.find_children("*", "MeshInstance3D", true, false):
+		mi.create_trimesh_collision()

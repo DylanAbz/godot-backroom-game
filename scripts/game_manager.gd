@@ -9,8 +9,9 @@ extends Node3D
 ## tools/screenshots/ puis quitter (vérification automatisée).
 
 const LEVELS := [
-	{"path": "res://assets/original_backrooms.glb", "name": "Niveau 0 — Les Backrooms"},
-	{"path": "res://assets/backrooms_another_level.glb", "name": "Niveau 1 — Plus profond"},
+	{"maze": true, "name": "Niveau 0 — Le Grand Labyrinthe", "lights": 44},
+	{"path": "res://assets/original_backrooms.glb", "name": "Niveau 1 — Les Backrooms", "lights": 12},
+	{"path": "res://assets/backrooms_another_level.glb", "name": "Niveau 2 — Plus profond", "lights": 26},
 ]
 const PLAYER_SCENE := preload("res://scenes/player.tscn")
 const SPAWN_POS := Vector3(0, 1.0, 0)
@@ -67,8 +68,10 @@ func _load_level() -> void:
 		portal = null
 	if level != null and is_instance_valid(level):
 		level.queue_free()
-	level = LevelRoot.new()
-	level.model_path = LEVELS[level_index]["path"]
+	var info: Dictionary = LEVELS[level_index]
+	level = MazeLevel.new() if info.get("maze", false) else LevelRoot.new()
+	if info.has("path"):
+		level.model_path = info["path"]
 	level.collisions_ready.connect(_on_collisions_ready, CONNECT_ONE_SHOT)
 	level.nav_ready.connect(_on_nav_ready, CONNECT_ONE_SHOT)
 	add_child(level)
@@ -101,20 +104,24 @@ func _on_nav_ready() -> void:
 
 
 func _place_portal() -> void:
-	var map := get_world_3d().navigation_map
 	var best := Vector3.ZERO
-	var best_d := -1.0
-	for i in 48:
-		var p := NavigationServer3D.map_get_random_point(map, 1, true)
-		if p.y > SPAWN_POS.y + 1.5:
-			# Point sur le toit ou hors zone jouable : ignoré.
-			continue
-		var d := p.distance_to(SPAWN_POS)
-		if d > best_d:
-			best_d = d
-			best = p
-	if best_d < 5.0:
-		return
+	if level.exit_hint != Vector3.INF:
+		# Niveau généré : la sortie est imposée par le générateur.
+		best = level.exit_hint
+	else:
+		var map := get_world_3d().navigation_map
+		var best_d := -1.0
+		for i in 48:
+			var p := NavigationServer3D.map_get_random_point(map, 1, true)
+			if p.y > SPAWN_POS.y + 1.5:
+				# Point sur le toit ou hors zone jouable : ignoré.
+				continue
+			var d := p.distance_to(SPAWN_POS)
+			if d > best_d:
+				best_d = d
+				best = p
+		if best_d < 5.0:
+			return
 	portal = Area3D.new()
 	portal.collision_layer = 0
 	portal.collision_mask = 2
@@ -165,7 +172,7 @@ func _on_portal_entered(body: Node3D) -> void:
 
 func _place_flicker_lights() -> void:
 	var map := get_world_3d().navigation_map
-	var count := 12 if level_index == 0 else 26
+	var count: int = LEVELS[level_index].get("lights", 16)
 	for i in count:
 		var p := NavigationServer3D.map_get_random_point(map, 1, true)
 		if p.y > SPAWN_POS.y + 1.5:
