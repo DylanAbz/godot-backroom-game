@@ -92,6 +92,13 @@ func _ready() -> void:
 	_model = model
 	add_child(model)
 	var aabb := combined_aabb(model)
+	# Les meshes skinnés sont rendus dans l'espace du squelette : si les binds
+	# compensent une autre unité, l'AABB du mesh ne reflète pas la taille à
+	# l'écran (smiler_backrooms : 3 cm mesurés, ~100x plus grand rendu). Quand
+	# l'écart est énorme, on se fie à l'étendue des os au repos.
+	var skel_aabb := skeleton_rest_aabb(model)
+	if skel_aabb.size.y > aabb.size.y * 5.0:
+		aabb = skel_aabb
 	var target_h: float = cfg.get("height", 2.0)
 	var s := target_h / maxf(aabb.size.y, 0.01)
 	if aabb.size.x * s > 3.0:
@@ -544,6 +551,29 @@ func _apply_part_motion(stride: float, opposite: float, speed_ratio: float) -> v
 		var rest: Vector3 = _part_rest_rot.get(part, part.rotation)
 		part.rotation = rest + Vector3(stride * amp * 0.45, 0.0,
 				sin(_motion_phase * 2.0) * 0.18 * _motion_blend)
+
+
+## AABB des positions globales de repos des os, dans l'espace de `root`.
+## Estime la taille rendue d'un mesh skinné quand l'AABB du mesh est fausse.
+static func skeleton_rest_aabb(root: Node) -> AABB:
+	var result := AABB()
+	var first := true
+	for node in root.find_children("*", "Skeleton3D", true, false):
+		var skel := node as Skeleton3D
+		var xform := Transform3D.IDENTITY
+		var p: Node = skel
+		while p != null and p != root:
+			if p is Node3D:
+				xform = p.transform * xform
+			p = p.get_parent()
+		for i in skel.get_bone_count():
+			var pos := xform * skel.get_bone_global_rest(i).origin
+			if first:
+				result = AABB(pos, Vector3.ZERO)
+				first = false
+			else:
+				result = result.expand(pos)
+	return result
 
 
 static func combined_aabb(root: Node) -> AABB:
